@@ -11,9 +11,15 @@ Validated SFT recipes for fine-tuning **Qwen 3.5** (4B and 9B Base) on Amazon Sa
 | `Qwen3.5-4B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-4B-Base | Full fine-tuning | ml.p4d.24xlarge | Not yet tested |
 | `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.p4d.24xlarge | Not yet tested |
 
-**QLoRA test results** (900 samples from AI-MO/NuminaMath-CoT, 1 epoch, ml.g5.2xlarge):
-- 4B: train_loss=0.536, ~30 min
-- 9B: train_loss=0.508, ~40 min
+**QLoRA test results** (Qwen3.5-9B-Base, 900 samples from AI-MO/NuminaMath-CoT, 1 epoch):
+
+| Instance | GPU | vRAM | Wall Clock | Billable |
+|----------|-----|------|------------|----------|
+| ml.g5.2xlarge | A10G | 24 GB | ~40 min | ~40 min |
+| ml.g6.4xlarge | L4 | 24 GB | ~35.5 min | ~35.5 min |
+| ml.g7e.2xlarge | L40S | 48 GB | ~19 min | ~19 min |
+
+No recipe changes were required when switching between instance types within the same family — the same YAML works across all tested instances.
 
 ## Quick Start
 
