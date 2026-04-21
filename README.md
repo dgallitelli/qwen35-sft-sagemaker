@@ -17,7 +17,7 @@ Validated SFT recipes for fine-tuning **Qwen 3.5** (4B and 9B Base) on Amazon Sa
 |----------|-----|------|------------|----------|
 | ml.g5.2xlarge | A10G | 24 GB | ~40 min | ~40 min |
 | ml.g6.4xlarge | L4 | 24 GB | ~35.5 min | ~35.5 min |
-| ml.g7e.2xlarge | L40S | 48 GB | ~19 min | ~19 min |
+| ml.g7e.2xlarge | RTX PRO 6000 Blackwell | 96 GB | ~19 min | ~19 min |
 
 No recipe changes were required when switching between instance types within the same family — the same YAML works across all tested instances.
 
