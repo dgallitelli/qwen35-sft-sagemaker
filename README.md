@@ -14,7 +14,8 @@ Validated SFT recipes for fine-tuning **Qwen 3.5** (4B and 9B, Base and post-tra
 | `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.g7e.12xlarge | Validated |
 | `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.g6e.12xlarge | Not yet tested |
 | `Qwen3.5-4B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-4B (Instruct) | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
-| `Qwen3.5-9B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B (Instruct) | QLoRA (4-bit) | ml.g5.2xlarge | Not yet tested |
+| `Qwen3.5-9B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B (Instruct) | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
+| `Qwen3.5-9B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B (Instruct) | QLoRA (4-bit) | ml.g6e.2xlarge | Validated |
 | `Qwen3.5-4B--vanilla-full.yaml` | Qwen/Qwen3.5-4B (Instruct) | Full fine-tuning | ml.g7e.2xlarge | Validated |
 | `Qwen3.5-9B--vanilla-full.yaml` | Qwen/Qwen3.5-9B (Instruct) | Full fine-tuning | ml.g7e.12xlarge | Validated |
 
@@ -37,6 +38,8 @@ No recipe changes were required when switching between instance types within the
 | T3 | 4B Instruct | Full SFT | ml.g7e.2xlarge | 1× RTX PRO 6000 Blackwell 96 GB | ~30 min |
 | T4 | 9B Base | Full SFT | ml.g7e.12xlarge | 4× RTX PRO 6000 Blackwell 384 GB total | ~49 min |
 | T5 | 9B Instruct | Full SFT | ml.g7e.12xlarge | 4× RTX PRO 6000 Blackwell 384 GB total | ~46 min |
+| T6 | 9B Instruct | QLoRA | ml.g5.2xlarge | 1× A10G 24 GB | ~28 min |
+| T7 | 9B Instruct | QLoRA | ml.g6e.2xlarge | 1× L40S 48 GB | ~22 min |
 
 The Instruct recipes pass the same `model_name_or_path` (drop the `-Base` suffix) and otherwise inherit the Base recipe wholesale — no DLC, dependency, or trainer changes were needed.
 
@@ -132,11 +135,37 @@ Qwen 3.5 is natively multimodal (vision-language). For text-only SFT, set `modal
 
 These defaults are wired into `launch_sft_job.py` via the `(variant, model, strategy)` mapping; pass `--instance-type` to override.
 
+## Reproducing the validation matrix
+
+The `experiments/` folder contains the harness used to validate every recipe
+in this repo against real SageMaker training jobs:
+
+```bash
+# 1. Set the SageMaker execution role you want training jobs to assume
+export SAGEMAKER_ROLE_ARN="arn:aws:iam::<account>:role/<role-name>"
+
+# 2. Submit every pending row from the matrix
+python experiments/launch_matrix.py
+
+# 3. (Optional) poll status until all jobs reach a terminal state
+python experiments/monitor_matrix.py
+```
+
+`experiments/matrix.template.json` is the public, account-agnostic test
+matrix. The first run bootstraps from it into `experiments/results.json`
+(gitignored — contains your account-specific S3 URI and training-job names).
+See `experiments/README.md` for details.
+
 ## Repo Structure
 
 ```
 ├── launch_sft_job.py                    # Training job launcher (SDK v3)
 ├── sft_recipe_generator.py              # Interactive recipe generator
+├── data/sft-dataset.jsonl               # Smoke-test dataset (100 synthetic Q/A pairs)
+├── experiments/                         # Recipe validation harness
+│   ├── matrix.template.json             # Public, account-agnostic test matrix
+│   ├── launch_matrix.py                 # Submits each pending row
+│   └── monitor_matrix.py                # Polls until terminal status
 └── sagemaker_code/
     ├── sft.py                           # Training entrypoint
     ├── sm_accelerate_train.sh           # Accelerate launch wrapper

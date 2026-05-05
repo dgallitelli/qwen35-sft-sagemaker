@@ -1,0 +1,78 @@
+{
+  "purpose": "Validate Qwen3.5 fine-tuning recipes for both Base and Instruct variants across QLoRA and full SFT on multiple instance types.",
+  "hf_naming_finding": "On HuggingFace the post-trained ('Instruct') models are published as Qwen/Qwen3.5-{4B,9B} with NO -Instruct suffix. The -Base suffix denotes the pretrained checkpoint. Both share the same Qwen3_5ForConditionalGeneration architecture; only weights and chat_template differ.",
+  "dataset": "data/sft-dataset.jsonl (100 synthetic Q/A pairs, system+user+assistant chat format)",
+  "region": null,
+  "tests": [
+    {
+      "id": "T1",
+      "model": "4b",
+      "variant": "instruct",
+      "strategy": "qlora",
+      "instance_type": "ml.g5.2xlarge",
+      "recipe": "sagemaker_code/hf_recipes/Qwen/Qwen3.5-4B--vanilla-peft-qlora.yaml",
+      "purpose": "Smoke-test QLoRA pipeline on Instruct variant.",
+      "submit_status": "pending"
+    },
+    {
+      "id": "T2",
+      "model": "4b",
+      "variant": "base",
+      "strategy": "full",
+      "instance_type": "ml.g7e.2xlarge",
+      "recipe": "sagemaker_code/hf_recipes/Qwen/Qwen3.5-4B-Base--vanilla-full.yaml",
+      "purpose": "Full-SFT validation of 4B Base on a single 96GB Blackwell GPU.",
+      "submit_status": "pending"
+    },
+    {
+      "id": "T3",
+      "model": "4b",
+      "variant": "instruct",
+      "strategy": "full",
+      "instance_type": "ml.g7e.2xlarge",
+      "recipe": "sagemaker_code/hf_recipes/Qwen/Qwen3.5-4B--vanilla-full.yaml",
+      "purpose": "Confirm Instruct full SFT runs on the same single-GPU footprint as Base.",
+      "submit_status": "pending"
+    },
+    {
+      "id": "T4",
+      "model": "9b",
+      "variant": "base",
+      "strategy": "full",
+      "instance_type": "ml.g7e.12xlarge",
+      "recipe": "sagemaker_code/hf_recipes/Qwen/Qwen3.5-9B-Base--vanilla-full.yaml",
+      "purpose": "Full-SFT validation of 9B Base on 4xRTX PRO 6000 Blackwell 384GB total.",
+      "submit_status": "pending"
+    },
+    {
+      "id": "T5",
+      "model": "9b",
+      "variant": "instruct",
+      "strategy": "full",
+      "instance_type": "ml.g7e.12xlarge",
+      "recipe": "sagemaker_code/hf_recipes/Qwen/Qwen3.5-9B--vanilla-full.yaml",
+      "purpose": "Confirm 9B Instruct full SFT on 4xRTX PRO 6000 Blackwell 384GB total.",
+      "submit_status": "pending"
+    },
+    {
+      "id": "T6",
+      "model": "9b",
+      "variant": "instruct",
+      "strategy": "qlora",
+      "instance_type": "ml.g5.2xlarge",
+      "recipe": "sagemaker_code/hf_recipes/Qwen/Qwen3.5-9B--vanilla-peft-qlora.yaml",
+      "purpose": "Validate 9B Instruct QLoRA on the same g5.2xl already validated for 9B Base QLoRA.",
+      "submit_status": "pending"
+    },
+    {
+      "id": "T7",
+      "model": "9b",
+      "variant": "instruct",
+      "strategy": "qlora",
+      "instance_type": "ml.g6e.2xlarge",
+      "recipe": "sagemaker_code/hf_recipes/Qwen/Qwen3.5-9B--vanilla-peft-qlora.yaml",
+      "purpose": "Validate 9B Instruct QLoRA on g6e.2xl (1xL40S 48GB) for an alternate single-GPU footprint.",
+      "submit_status": "pending"
+    }
+  ]
+}
