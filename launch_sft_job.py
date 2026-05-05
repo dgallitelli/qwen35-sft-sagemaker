@@ -33,7 +33,10 @@ from sagemaker.train.configs import (
 )
 
 # --- Config (update these for your account) ---
-REGION = "ap-southeast-1"
+# Fallback region used only when the caller's AWS environment has no
+# region configured (no AWS_REGION / AWS_DEFAULT_REGION env var, no
+# ~/.aws/config profile region, no --region flag). See resolve_region().
+DEFAULT_REGION_FALLBACK = "ap-southeast-1"
 ROLE_ARN = None  # Set to your SageMaker execution role ARN, or None to auto-detect
 DATASET_S3_URI = None  # Set to your S3 dataset URI, or None to upload LOCAL_DATASET_PATH
 LOCAL_DATASET_PATH = "data/sft-dataset.jsonl"  # Local path to upload if DATASET_S3_URI is None
@@ -51,11 +54,45 @@ RECIPES = {
 }
 
 
+def resolve_region():
+    """Pick a region in this order:
+
+    1. boto3 default (botocore's resolution chain: ``AWS_REGION`` then
+       ``AWS_DEFAULT_REGION`` env vars, then the active ``~/.aws/config``
+       profile, then the EC2 IMDS region endpoint unless
+       ``AWS_EC2_METADATA_DISABLED=true``), so the launcher matches the
+       user's existing AWS setup without surprise.
+    2. ``DEFAULT_REGION_FALLBACK`` if nothing is configured. A warning
+       is printed when the fallback fires so callers notice their AWS
+       env has no region set rather than silently shipping to it.
+
+    The ``--region`` CLI flag still overrides this resolution.
+    """
+    region = boto3.Session().region_name
+    if region:
+        return region
+    print(
+        f"WARNING: no AWS region resolved from env / profile / IMDS; "
+        f"falling back to {DEFAULT_REGION_FALLBACK}. Set AWS_REGION or "
+        f"pass --region to silence this."
+    )
+    return DEFAULT_REGION_FALLBACK
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Launch Qwen3.5 SFT on SageMaker")
     parser.add_argument("--model", choices=["4b", "9b"], default="9b", help="Model size (default: 9b)")
     parser.add_argument("--strategy", choices=["qlora", "full"], default="qlora", help="Training strategy (default: qlora)")
-    parser.add_argument("--region", default=REGION, help=f"AWS region (default: {REGION})")
+    default_region = resolve_region()
+    parser.add_argument(
+        "--region",
+        default=default_region,
+        help=(
+            f"AWS region (default: {default_region}; resolved from boto3 "
+            f"session, falling back to {DEFAULT_REGION_FALLBACK} when "
+            f"nothing is configured)"
+        ),
+    )
     parser.add_argument("--role", default=ROLE_ARN, help="SageMaker execution role ARN")
     parser.add_argument("--dataset-s3", default=DATASET_S3_URI, help="S3 URI to dataset JSONL")
     parser.add_argument("--dataset-local", default=LOCAL_DATASET_PATH, help="Local dataset path to upload")
@@ -248,6 +285,29 @@ def main():
         # needed (success or failure), so reclaiming it here is safe.
         if cleanup_staged_source is not None:
             cleanup_staged_source()
+
+    # Echo the SDK-resolved identifiers and S3 paths so users can grep
+    # for them later (e.g. to find model.tar.gz, checkpoints, or join
+    # against MLflow / CloudWatch).
+    #
+    # _latest_training_job is a Pydantic PrivateAttr on ModelTrainer
+    # (sagemaker/train/model_trainer.py:252) populated unconditionally
+    # right after CreateTrainingJob in SAGEMAKER_TRAINING_JOB mode
+    # (sagemaker/train/model_trainer.py:798), regardless of wait=. The
+    # SDK also mutates checkpoint_config.s3_uri in place during train()
+    # at lines 614-618 of the same file, so the value is visible on the
+    # instance handle we already hold.
+    latest = getattr(model_trainer, "_latest_training_job", None)
+    job_name = getattr(latest, "training_job_name", None)
+    if job_name:
+        out_prefix = output_path.rstrip("/")
+        ckpt_uri = getattr(
+            getattr(model_trainer, "checkpoint_config", None), "s3_uri", None
+        )
+        print(f"\nTrainingJobName: {job_name}")
+        print(f"Output prefix:   {out_prefix}/{job_name}/output/")
+        print(f"Model artifact:  {out_prefix}/{job_name}/output/model.tar.gz")
+        print(f"Checkpoints:     {ckpt_uri}")
 
     if args.wait:
         print("\nTraining job completed.")
