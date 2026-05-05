@@ -49,6 +49,13 @@ python launch_sft_job.py --model 9b --strategy full
 
 # Point to dataset already in S3
 python launch_sft_job.py --dataset-s3 s3://my-bucket/data/sft-dataset.jsonl
+
+# Sideload a SageMaker inference handler so it ships inside model.tar.gz
+# at code/inference.py — picked up automatically by the HF Inference DLC.
+# No post-job download/untar/repack/re-upload dance required.
+python launch_sft_job.py \
+    --inference-handler ./inference.py \
+    --inference-requirements ./requirements.txt   # optional
 ```
 
 ### 3. Customize the recipe

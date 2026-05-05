@@ -425,6 +425,45 @@ maybe_merge_peft_adapter() {
 }
 
 
+############################################
+# Sideload inference.py into the model artifact
+#
+# When the launcher passes --inference-handler, the file is staged under
+# ${SCRIPT_DIR}/sm_inference/. Copy it (and any sibling requirements.txt)
+# into ${SM_MODEL_DIR}/<model>/code/ on rank 0 so SageMaker's archiver
+# ships it inside model.tar.gz at code/inference.py — picked up by the HF
+# Inference DLC via SAGEMAKER_PROGRAM=inference.py.
+############################################
+maybe_attach_inference_handler() {
+    if [[ "${MACHINE_RANK:-0}" != "0" ]]; then
+        return 0
+    fi
+
+    local handler_src="${SCRIPT_DIR}/sm_inference/inference.py"
+    local reqs_src="${SCRIPT_DIR}/sm_inference/requirements.txt"
+
+    if [[ ! -f "$handler_src" ]]; then
+        log_info "No sideloaded inference handler at $handler_src; skipping attach."
+        return 0
+    fi
+
+    local model_dir
+    if ! model_dir="$(get_model_dir_from_config "$CONFIG_PATH")"; then
+        log_warning "Unable to determine model_dir from config; skipping handler attach."
+        return 0
+    fi
+
+    local code_dir="${model_dir%/}/code"
+    mkdir -p "$code_dir"
+    cp "$handler_src" "${code_dir}/inference.py"
+    log_success "Attached inference handler -> ${code_dir}/inference.py"
+
+    if [[ -f "$reqs_src" ]]; then
+        cp "$reqs_src" "${code_dir}/requirements.txt"
+        log_success "Attached inference requirements -> ${code_dir}/requirements.txt"
+    fi
+}
+
 
 ############################################
 # Main
@@ -460,6 +499,11 @@ main() {
             run_evaluation
         fi
     fi
+
+    # Attach a sideloaded SageMaker inference.py (if the launcher staged
+    # one) into ${SM_MODEL_DIR}/<model>/code/, so it ends up inside
+    # model.tar.gz without any post-job repacking.
+    maybe_attach_inference_handler
 
     log_success "All steps completed successfully"
 }

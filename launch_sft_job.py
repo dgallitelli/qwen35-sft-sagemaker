@@ -8,11 +8,18 @@ Usage:
     python launch_sft_job.py --model 4b --strategy qlora        # 4B QLoRA
     python launch_sft_job.py --model 9b --strategy full         # 9B full fine-tuning
 
+    # Sideload a SageMaker inference handler so it lands in model.tar.gz
+    # at code/inference.py — no manual repacking needed.
+    python launch_sft_job.py --inference-handler ./inference.py \
+        [--inference-requirements ./requirements.txt]
+
 Prerequisites:
     pip install sagemaker boto3 datasets
 """
 import argparse
 import os
+import shutil
+import tempfile
 import boto3
 from sagemaker.core.helper.session_helper import Session, get_execution_role
 from sagemaker.train.model_trainer import ModelTrainer
@@ -53,7 +60,59 @@ def parse_args():
     parser.add_argument("--dataset-s3", default=DATASET_S3_URI, help="S3 URI to dataset JSONL")
     parser.add_argument("--dataset-local", default=LOCAL_DATASET_PATH, help="Local dataset path to upload")
     parser.add_argument("--wait", action="store_true", help="Wait for training job to complete")
+    parser.add_argument(
+        "--inference-handler",
+        default=None,
+        help=(
+            "Local path to a SageMaker inference.py. When set, the file is "
+            "staged into the source bundle and copied into the merged-model "
+            "directory at the end of training, so it ships inside model.tar.gz "
+            "as code/inference.py — no post-job repacking required."
+        ),
+    )
+    parser.add_argument(
+        "--inference-requirements",
+        default=None,
+        help=(
+            "Optional local requirements.txt to ship next to the inference "
+            "handler. The HuggingFace Inference DLC pip-installs it on "
+            "container start."
+        ),
+    )
     return parser.parse_args()
+
+
+def stage_source_with_handler(sagemaker_code_dir, inference_handler, inference_requirements):
+    """
+    Copy `sagemaker_code/` into a tempdir and drop the inference handler
+    (and optional requirements.txt) under `sm_inference/` — the path that
+    `sm_accelerate_train.sh` looks up at the end of training.
+
+    Returns (staged_dir, cleanup_callable). Caller must invoke cleanup
+    after the SageMaker train() call returns.
+    """
+    if not os.path.isfile(inference_handler):
+        raise FileNotFoundError(f"inference handler not found: {inference_handler}")
+    if inference_requirements and not os.path.isfile(inference_requirements):
+        raise FileNotFoundError(f"inference requirements not found: {inference_requirements}")
+
+    staged_dir = tempfile.mkdtemp(prefix="qwen35-sft-src-")
+    staged_code = os.path.join(staged_dir, "sagemaker_code")
+    shutil.copytree(sagemaker_code_dir, staged_code)
+
+    sm_inference_dir = os.path.join(staged_code, "sm_inference")
+    os.makedirs(sm_inference_dir, exist_ok=True)
+    shutil.copy2(inference_handler, os.path.join(sm_inference_dir, "inference.py"))
+    if inference_requirements:
+        shutil.copy2(
+            inference_requirements,
+            os.path.join(sm_inference_dir, "requirements.txt"),
+        )
+
+    def _cleanup():
+        shutil.rmtree(staged_dir, ignore_errors=True)
+
+    return staged_code, _cleanup
 
 
 def main():
@@ -108,6 +167,19 @@ def main():
         "sagemaker_code",
     )
 
+    cleanup_staged_source = None
+    if args.inference_handler:
+        sagemaker_code_dir, cleanup_staged_source = stage_source_with_handler(
+            sagemaker_code_dir,
+            args.inference_handler,
+            args.inference_requirements,
+        )
+        print(f"Sideload: {args.inference_handler} -> sm_inference/inference.py")
+        if args.inference_requirements:
+            print(
+                f"Sideload: {args.inference_requirements} -> sm_inference/requirements.txt"
+            )
+
     source_code = SourceCode(
         source_dir=sagemaker_code_dir,
         command=f"bash sm_accelerate_train.sh --config {recipe_path}",
@@ -147,15 +219,21 @@ def main():
     )
 
     print(f"\nLaunching training job: {base_job_name}")
-    model_trainer.train(
-        input_data_config=[
-            InputData(
-                channel_name="training",
-                data_source=dataset_s3_uri,
-            )
-        ],
-        wait=args.wait,
-    )
+    try:
+        model_trainer.train(
+            input_data_config=[
+                InputData(
+                    channel_name="training",
+                    data_source=dataset_s3_uri,
+                )
+            ],
+            wait=args.wait,
+        )
+    finally:
+        # The staged tempdir has already been uploaded by SageMaker; safe
+        # to delete regardless of how train() returned.
+        if cleanup_staged_source is not None:
+            cleanup_staged_source()
 
     if args.wait:
         print("\nTraining job completed.")
