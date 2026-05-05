@@ -97,17 +97,23 @@ def stage_source_with_handler(sagemaker_code_dir, inference_handler, inference_r
         raise FileNotFoundError(f"inference requirements not found: {inference_requirements}")
 
     staged_dir = tempfile.mkdtemp(prefix="qwen35-sft-src-")
-    staged_code = os.path.join(staged_dir, "sagemaker_code")
-    shutil.copytree(sagemaker_code_dir, staged_code)
+    try:
+        staged_code = os.path.join(staged_dir, "sagemaker_code")
+        shutil.copytree(sagemaker_code_dir, staged_code)
 
-    sm_inference_dir = os.path.join(staged_code, "sm_inference")
-    os.makedirs(sm_inference_dir, exist_ok=True)
-    shutil.copy2(inference_handler, os.path.join(sm_inference_dir, "inference.py"))
-    if inference_requirements:
-        shutil.copy2(
-            inference_requirements,
-            os.path.join(sm_inference_dir, "requirements.txt"),
-        )
+        sm_inference_dir = os.path.join(staged_code, "sm_inference")
+        os.makedirs(sm_inference_dir, exist_ok=True)
+        shutil.copy2(inference_handler, os.path.join(sm_inference_dir, "inference.py"))
+        if inference_requirements:
+            shutil.copy2(
+                inference_requirements,
+                os.path.join(sm_inference_dir, "requirements.txt"),
+            )
+    except BaseException:
+        # If staging fails partway through, the caller never receives the
+        # cleanup callable, so reclaim the tempdir here before propagating.
+        shutil.rmtree(staged_dir, ignore_errors=True)
+        raise
 
     def _cleanup():
         shutil.rmtree(staged_dir, ignore_errors=True)
@@ -210,10 +216,16 @@ def main():
         compute=compute,
         stopping_condition=StoppingCondition(max_runtime_in_seconds=86400),
         output_data_config=OutputDataConfig(s3_output_path=output_path),
-        checkpoint_config=CheckpointConfig(
-            s3_uri=os.path.join(output_path, "checkpoints"),
-            local_path="/opt/ml/checkpoints",
-        ),
+        # Leaving CheckpointConfig.s3_uri unset is deliberate: SDK v3 then
+        # auto-derives a per-run path of the form
+        # s3://<default_bucket>/<default_prefix>/<base_job_name>/<TrainingJobName>/checkpoints
+        # (see sagemaker.train.model_trainer:614-618 and
+        #  sagemaker.core.training.configs.CheckpointConfig docstring).
+        # Pinning s3_uri here previously made every run share one
+        # checkpoint folder, so SageMaker auto-restored optimizer state
+        # from a prior (LoRA-shape-mismatched) run and crashed with a
+        # tensor-shape RuntimeError on resume.
+        checkpoint_config=CheckpointConfig(local_path="/opt/ml/checkpoints"),
         role=role,
         environment=training_env,
     )
@@ -230,8 +242,10 @@ def main():
             wait=args.wait,
         )
     finally:
-        # The staged tempdir has already been uploaded by SageMaker; safe
-        # to delete regardless of how train() returned.
+        # ModelTrainer.train() uploads source_dir synchronously to S3
+        # before issuing CreateTrainingJob, regardless of `wait`. By the
+        # time we reach this finally clause the tempdir is no longer
+        # needed (success or failure), so reclaiming it here is safe.
         if cleanup_staged_source is not None:
             cleanup_staged_source()
 
