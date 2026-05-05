@@ -1,15 +1,22 @@
 # Qwen 3.5 SFT Recipes — Qwen 3.5 on SageMaker
 
-Validated SFT recipes for fine-tuning **Qwen 3.5** (4B and 9B Base) on Amazon SageMaker Training Jobs using the [SageMaker Generative AI Recipes](https://github.com/aws-samples/amazon-sagemaker-generativeai) framework.
+Validated SFT recipes for fine-tuning **Qwen 3.5** (4B and 9B, Base and post-trained) on Amazon SageMaker Training Jobs using the [SageMaker Generative AI Recipes](https://github.com/aws-samples/amazon-sagemaker-generativeai) framework.
 
 ## What's Included
+
+> **Variant naming:** On HuggingFace, the post-trained ("Instruct") models are published as `Qwen/Qwen3.5-{4B,9B}` with **no `-Instruct` suffix** — the `-Base` suffix denotes the pretrained checkpoint. Both variants share the same `Qwen3_5ForConditionalGeneration` architecture, so the same DLC and dependency pins apply; only weights and `chat_template.jinja` differ. The launcher exposes this with `--variant {base,instruct}` (default: `base`).
 
 | Recipe | Model | Strategy | Tested Instance | Status |
 |--------|-------|----------|----------------|--------|
 | `Qwen3.5-4B-Base--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-4B-Base | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
 | `Qwen3.5-9B-Base--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B-Base | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
-| `Qwen3.5-4B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-4B-Base | Full fine-tuning | ml.p4d.24xlarge | Not yet tested |
-| `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.p4d.24xlarge | Not yet tested |
+| `Qwen3.5-4B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-4B-Base | Full fine-tuning | ml.g7e.2xlarge | Validated |
+| `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.g7e.12xlarge | Validated |
+| `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.g6e.12xlarge | Not yet tested |
+| `Qwen3.5-4B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-4B (Instruct) | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
+| `Qwen3.5-9B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B (Instruct) | QLoRA (4-bit) | ml.g5.2xlarge | Not yet tested |
+| `Qwen3.5-4B--vanilla-full.yaml` | Qwen/Qwen3.5-4B (Instruct) | Full fine-tuning | ml.g7e.2xlarge | Validated |
+| `Qwen3.5-9B--vanilla-full.yaml` | Qwen/Qwen3.5-9B (Instruct) | Full fine-tuning | ml.g7e.12xlarge | Validated |
 
 **QLoRA test results** (Qwen3.5-9B-Base, 900 samples from AI-MO/NuminaMath-CoT, 1 epoch):
 
@@ -20,6 +27,18 @@ Validated SFT recipes for fine-tuning **Qwen 3.5** (4B and 9B Base) on Amazon Sa
 | ml.g7e.2xlarge | RTX PRO 6000 Blackwell | 96 GB | ~19 min | ~19 min |
 
 No recipe changes were required when switching between instance types within the same family — the same YAML works across all tested instances.
+
+**Instruct-variant smoke-test results** (100 synthetic Q/A pairs, 10 epochs, default recipe hyperparameters):
+
+| # | Variant | Strategy | Instance | GPU(s) | Billable |
+|---|---------|----------|----------|--------|----------|
+| T1 | 4B Instruct | QLoRA | ml.g5.2xlarge | 1× A10G 24 GB | ~21 min |
+| T2 | 4B Base | Full SFT | ml.g7e.2xlarge | 1× RTX PRO 6000 Blackwell 96 GB | ~29 min |
+| T3 | 4B Instruct | Full SFT | ml.g7e.2xlarge | 1× RTX PRO 6000 Blackwell 96 GB | ~30 min |
+| T4 | 9B Base | Full SFT | ml.g7e.12xlarge | 4× RTX PRO 6000 Blackwell 384 GB total | ~49 min |
+| T5 | 9B Instruct | Full SFT | ml.g7e.12xlarge | 4× RTX PRO 6000 Blackwell 384 GB total | ~46 min |
+
+The Instruct recipes pass the same `model_name_or_path` (drop the `-Base` suffix) and otherwise inherit the Base recipe wholesale — no DLC, dependency, or trainer changes were needed.
 
 ## Quick Start
 
@@ -38,17 +57,26 @@ Place it at `data/sft-dataset.jsonl` (or pass `--dataset-s3` / `--dataset-local`
 ```bash
 pip install sagemaker boto3
 
-# QLoRA on 9B (default) — runs on ml.g5.2xlarge
+# QLoRA on 9B Base (default) — runs on ml.g5.2xlarge
 python launch_sft_job.py
 
-# QLoRA on 4B
+# QLoRA on 4B Base
 python launch_sft_job.py --model 4b
 
-# Full fine-tuning on 9B — requires ml.p4d.24xlarge
+# QLoRA on 4B Instruct (post-trained variant)
+python launch_sft_job.py --variant instruct --model 4b
+
+# Full fine-tuning on 9B Base — runs on ml.g7e.12xlarge by default
 python launch_sft_job.py --model 9b --strategy full
+
+# Full fine-tuning on 9B Instruct — runs on ml.g7e.12xlarge by default
+python launch_sft_job.py --variant instruct --model 9b --strategy full
 
 # Point to dataset already in S3
 python launch_sft_job.py --dataset-s3 s3://my-bucket/data/sft-dataset.jsonl
+
+# Override the instance type chosen by the (variant, model, strategy) mapping
+python launch_sft_job.py --model 4b --strategy full --instance-type ml.g6e.4xlarge
 
 # Sideload a SageMaker inference handler so it ships inside model.tar.gz
 # at code/inference.py — picked up automatically by the HF Inference DLC.
@@ -97,10 +125,12 @@ Qwen 3.5 is natively multimodal (vision-language). For text-only SFT, set `modal
 
 | Strategy | 4B | 9B |
 |----------|-----|-----|
-| QLoRA | ml.g5.2xlarge (1x A10G, 24GB) | ml.g5.2xlarge (1x A10G, 24GB) |
-| Full fine-tuning | ml.g5.12xlarge (4x A10G, 96GB) | ml.p4d.24xlarge (8x A100, 320GB) |
+| QLoRA | ml.g5.2xlarge (1× A10G, 24 GB) | ml.g5.2xlarge (1× A10G, 24 GB) |
+| Full fine-tuning | ml.g7e.2xlarge (1× RTX PRO 6000 Blackwell, 96 GB) | ml.g7e.12xlarge (4× RTX PRO 6000 Blackwell, 384 GB total) |
 
 > V100 instances (p3 family) do **not** support bf16, which is required for Qwen3/3.5. Use g5 or newer.
+
+These defaults are wired into `launch_sft_job.py` via the `(variant, model, strategy)` mapping; pass `--instance-type` to override.
 
 ## Repo Structure
 
@@ -118,7 +148,11 @@ Qwen 3.5 is natively multimodal (vision-language). For text-only SFT, set `modal
         ├── Qwen3.5-4B-Base--vanilla-peft-qlora.yaml
         ├── Qwen3.5-9B-Base--vanilla-peft-qlora.yaml
         ├── Qwen3.5-4B-Base--vanilla-full.yaml
-        └── Qwen3.5-9B-Base--vanilla-full.yaml
+        ├── Qwen3.5-9B-Base--vanilla-full.yaml
+        ├── Qwen3.5-4B--vanilla-peft-qlora.yaml         # Instruct variant
+        ├── Qwen3.5-9B--vanilla-peft-qlora.yaml         # Instruct variant
+        ├── Qwen3.5-4B--vanilla-full.yaml               # Instruct variant
+        └── Qwen3.5-9B--vanilla-full.yaml               # Instruct variant
 ```
 
 ## Credits
