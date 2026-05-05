@@ -83,14 +83,17 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Launch Qwen3.5 SFT on SageMaker")
     parser.add_argument("--model", choices=["4b", "9b"], default="9b", help="Model size (default: 9b)")
     parser.add_argument("--strategy", choices=["qlora", "full"], default="qlora", help="Training strategy (default: qlora)")
-    default_region = resolve_region()
+    # Default is left as None and resolved lazily in main() via
+    # resolve_region(). Resolving here would force every --help invocation
+    # to wait for boto3 session init (and a possible IMDS timeout on
+    # non-EC2 hosts with no AWS config) for no benefit.
     parser.add_argument(
         "--region",
-        default=default_region,
+        default=None,
         help=(
-            f"AWS region (default: {default_region}; resolved from boto3 "
-            f"session, falling back to {DEFAULT_REGION_FALLBACK} when "
-            f"nothing is configured)"
+            f"AWS region. If unset, resolved from the boto3 session "
+            f"(env / profile / IMDS), falling back to "
+            f"{DEFAULT_REGION_FALLBACK} when nothing is configured."
         ),
     )
     parser.add_argument("--role", default=ROLE_ARN, help="SageMaker execution role ARN")
@@ -161,6 +164,10 @@ def stage_source_with_handler(sagemaker_code_dir, inference_handler, inference_r
 def main():
     args = parse_args()
     recipe_path, instance_type = RECIPES[(args.model, args.strategy)]
+
+    # Resolve region lazily (see resolve_region() docstring).
+    if not args.region:
+        args.region = resolve_region()
 
     # Session
     boto_session = boto3.Session(region_name=args.region)
