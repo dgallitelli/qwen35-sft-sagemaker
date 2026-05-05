@@ -4,9 +4,14 @@ Uploads a local JSONL dataset to S3, then starts a training job.
 SageMaker Python SDK v3 (ModelTrainer)
 
 Usage:
-    python launch_sft_job.py                                    # defaults: 9B QLoRA
-    python launch_sft_job.py --model 4b --strategy qlora        # 4B QLoRA
-    python launch_sft_job.py --model 9b --strategy full         # 9B full fine-tuning
+    python launch_sft_job.py                                    # defaults: 9B Base QLoRA
+    python launch_sft_job.py --model 4b --strategy qlora        # 4B Base QLoRA
+    python launch_sft_job.py --model 9b --strategy full         # 9B Base full fine-tuning
+
+    # Train the post-trained ("Instruct") variant: drop -Base from the HF id.
+    # On HF the post-trained model is published as Qwen/Qwen3.5-{4B,9B}, with
+    # *no* -Instruct suffix.
+    python launch_sft_job.py --variant instruct --model 4b --strategy qlora
 
     # Sideload a SageMaker inference handler so it lands in model.tar.gz
     # at code/inference.py — no manual repacking needed.
@@ -45,12 +50,24 @@ S3_PREFIX = "qwen35-sft"  # S3 prefix for outputs and dataset uploads
 # DLC image — PyTorch 2.9.0, CUDA 13.0, Python 3.12
 DLC_TAG = "2.9.0-gpu-py312-cu130-ubuntu22.04-sagemaker"
 
-# Recipe and instance mapping
+# Recipe and instance mapping, keyed by (variant, model_size, strategy).
+#
+# Variant naming follows HuggingFace's convention for Qwen3.5:
+#   - "base"     -> Qwen/Qwen3.5-{4B,9B}-Base (pretrained)
+#   - "instruct" -> Qwen/Qwen3.5-{4B,9B}      (post-trained; NO "-Instruct" suffix on HF)
+#
+# Full-FT defaults updated to single-node g7e instead of p4d.24xlarge:
+# 4B fits on one RTX PRO 6000 Blackwell (96 GB), 9B fits on 4x RTX PRO 6000
+# Blackwell (384 GB total) with ZeRO-3 + gradient checkpointing.
 RECIPES = {
-    ("4b", "qlora"): ("hf_recipes/Qwen/Qwen3.5-4B-Base--vanilla-peft-qlora.yaml", "ml.g5.2xlarge"),
-    ("9b", "qlora"): ("hf_recipes/Qwen/Qwen3.5-9B-Base--vanilla-peft-qlora.yaml", "ml.g5.2xlarge"),
-    ("4b", "full"):  ("hf_recipes/Qwen/Qwen3.5-4B-Base--vanilla-full.yaml", "ml.p4d.24xlarge"),
-    ("9b", "full"):  ("hf_recipes/Qwen/Qwen3.5-9B-Base--vanilla-full.yaml", "ml.p4d.24xlarge"),
+    ("base", "4b", "qlora"): ("hf_recipes/Qwen/Qwen3.5-4B-Base--vanilla-peft-qlora.yaml", "ml.g5.2xlarge"),
+    ("base", "9b", "qlora"): ("hf_recipes/Qwen/Qwen3.5-9B-Base--vanilla-peft-qlora.yaml", "ml.g5.2xlarge"),
+    ("base", "4b", "full"):  ("hf_recipes/Qwen/Qwen3.5-4B-Base--vanilla-full.yaml", "ml.g7e.2xlarge"),
+    ("base", "9b", "full"):  ("hf_recipes/Qwen/Qwen3.5-9B-Base--vanilla-full.yaml", "ml.g7e.12xlarge"),
+    ("instruct", "4b", "qlora"): ("hf_recipes/Qwen/Qwen3.5-4B--vanilla-peft-qlora.yaml", "ml.g5.2xlarge"),
+    ("instruct", "9b", "qlora"): ("hf_recipes/Qwen/Qwen3.5-9B--vanilla-peft-qlora.yaml", "ml.g5.2xlarge"),
+    ("instruct", "4b", "full"):  ("hf_recipes/Qwen/Qwen3.5-4B--vanilla-full.yaml", "ml.g7e.2xlarge"),
+    ("instruct", "9b", "full"):  ("hf_recipes/Qwen/Qwen3.5-9B--vanilla-full.yaml", "ml.g7e.12xlarge"),
 }
 
 
@@ -81,6 +98,16 @@ def resolve_region():
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Launch Qwen3.5 SFT on SageMaker")
+    parser.add_argument(
+        "--variant",
+        choices=["base", "instruct"],
+        default="base",
+        help=(
+            "Model variant (default: base). 'instruct' selects the post-trained "
+            "checkpoints, which on HF are published as Qwen/Qwen3.5-{4B,9B} "
+            "(no -Instruct suffix)."
+        ),
+    )
     parser.add_argument("--model", choices=["4b", "9b"], default="9b", help="Model size (default: 9b)")
     parser.add_argument("--strategy", choices=["qlora", "full"], default="qlora", help="Training strategy (default: qlora)")
     # Default is left as None and resolved lazily in main() via
@@ -100,6 +127,22 @@ def parse_args():
     parser.add_argument("--dataset-s3", default=DATASET_S3_URI, help="S3 URI to dataset JSONL")
     parser.add_argument("--dataset-local", default=LOCAL_DATASET_PATH, help="Local dataset path to upload")
     parser.add_argument("--wait", action="store_true", help="Wait for training job to complete")
+    parser.add_argument(
+        "--instance-type",
+        default=None,
+        help=(
+            "Override the instance type from the (variant, model, strategy) "
+            "mapping. Useful for matrix testing across instance families."
+        ),
+    )
+    parser.add_argument(
+        "--base-job-name",
+        default=None,
+        help=(
+            "Override the auto-generated base job name. Useful for tagging "
+            "matrix-test runs with a discoverable suffix."
+        ),
+    )
     parser.add_argument(
         "--inference-handler",
         default=None,
@@ -163,7 +206,9 @@ def stage_source_with_handler(sagemaker_code_dir, inference_handler, inference_r
 
 def main():
     args = parse_args()
-    recipe_path, instance_type = RECIPES[(args.model, args.strategy)]
+    recipe_path, instance_type = RECIPES[(args.variant, args.model, args.strategy)]
+    if args.instance_type:
+        instance_type = args.instance_type
 
     # Resolve region lazily (see resolve_region() docstring).
     if not args.region:
@@ -178,6 +223,7 @@ def main():
     print(f"Region:   {args.region}")
     print(f"Role:     {role}")
     print(f"Bucket:   {bucket}")
+    print(f"Variant:  {args.variant}")
     print(f"Recipe:   {recipe_path}")
     print(f"Instance: {instance_type}")
 
@@ -241,8 +287,13 @@ def main():
         volume_size_in_gb=200,
     )
 
-    model_tag = f"qwen35-{args.model}"
-    base_job_name = f"{model_tag}-{args.strategy}-sft"
+    if args.base_job_name:
+        base_job_name = args.base_job_name
+    else:
+        # Variant goes into the job name so 'base' vs 'instruct' runs land in
+        # distinct S3 prefixes and CloudWatch log groups.
+        model_tag = f"qwen35-{args.model}-{args.variant}"
+        base_job_name = f"{model_tag}-{args.strategy}-sft"
     output_path = f"s3://{bucket}/{S3_PREFIX}/{base_job_name}"
 
     training_env = {"NCCL_DEBUG": "INFO"}
