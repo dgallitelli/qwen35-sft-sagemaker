@@ -19,6 +19,12 @@ def now_iso():
 
 
 def main():
+    if not RESULTS_PATH.exists():
+        raise FileNotFoundError(
+            f"Results file not found: {RESULTS_PATH}. "
+            "Run `python experiments/launch_matrix.py` first to bootstrap "
+            "the matrix and submit jobs."
+        )
     with open(RESULTS_PATH) as f:
         results = json.load(f)
     region = results.get("region", "us-east-1")

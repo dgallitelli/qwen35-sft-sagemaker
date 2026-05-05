@@ -9,7 +9,6 @@ Idempotent: rows already 'submitted' or further are skipped.
 import json
 import os
 import sys
-import time
 import datetime
 from pathlib import Path
 
