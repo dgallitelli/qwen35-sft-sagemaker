@@ -7,7 +7,17 @@ versions are not strictly tagged — entries are grouped by merge date.
 
 ## Unreleased
 
-### Changed
+### Documented
+- README "Default Hyperparameters" section listing every recipe setting that
+  the validation matrix was run against, plus a memory-footprint hint for 9B
+  full SFT (~43 GB peak per GPU).
+- 9B Base full SFT on `ml.g6e.12xlarge` (4×L40S 192 GB total) marked **Does
+  not fit (OOM)**. The recipe defaults peak at ~43 GB per GPU during the
+  backward pass, exceeding L40S usable VRAM (~44.4 GB after CUDA overhead).
+  Use `ml.g7e.12xlarge` (4×96 GB Blackwell) or tune the recipe down
+  (smaller batch / seq length / optimizer offload).
+
+### Changed (previously)
 - `launch_sft_job.py`: removed the silent `DEFAULT_REGION_FALLBACK` (`ap-southeast-1`).
   When no region is configured (no `AWS_REGION` / `AWS_DEFAULT_REGION` env var,
   no profile, no IMDS), the script now raises with a clear message instead of
