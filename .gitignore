@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 tmp_dataset/
-data/
 *.egg-info/
 .DS_Store
+
+# Test-harness state file (account/bucket-specific). Contains the
+# canonical experiment row schema and is regenerated per run.
+experiments/results.json
