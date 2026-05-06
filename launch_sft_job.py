@@ -38,10 +38,6 @@ from sagemaker.train.configs import (
 )
 
 # --- Config (update these for your account) ---
-# Fallback region used only when the caller's AWS environment has no
-# region configured (no AWS_REGION / AWS_DEFAULT_REGION env var, no
-# ~/.aws/config profile region, no --region flag). See resolve_region().
-DEFAULT_REGION_FALLBACK = "ap-southeast-1"
 ROLE_ARN = None  # Set to your SageMaker execution role ARN, or None to auto-detect
 DATASET_S3_URI = None  # Set to your S3 dataset URI, or None to upload LOCAL_DATASET_PATH
 LOCAL_DATASET_PATH = "data/sft-dataset.jsonl"  # Local path to upload if DATASET_S3_URI is None
@@ -72,28 +68,24 @@ RECIPES = {
 
 
 def resolve_region():
-    """Pick a region in this order:
+    """Resolve the AWS region from the boto3 session.
 
-    1. boto3 default (botocore's resolution chain: ``AWS_REGION`` then
-       ``AWS_DEFAULT_REGION`` env vars, then the active ``~/.aws/config``
-       profile, then the EC2 IMDS region endpoint unless
-       ``AWS_EC2_METADATA_DISABLED=true``), so the launcher matches the
-       user's existing AWS setup without surprise.
-    2. ``DEFAULT_REGION_FALLBACK`` if nothing is configured. A warning
-       is printed when the fallback fires so callers notice their AWS
-       env has no region set rather than silently shipping to it.
+    Uses botocore's resolution chain: ``AWS_REGION`` then
+    ``AWS_DEFAULT_REGION`` env vars, then the active ``~/.aws/config``
+    profile, then the EC2 IMDS region endpoint unless
+    ``AWS_EC2_METADATA_DISABLED=true``. Raises if nothing is configured —
+    silent defaults to a hard-coded region in a public repo are a
+    footgun for users who don't notice their AWS env is missing.
 
     The ``--region`` CLI flag still overrides this resolution.
     """
     region = boto3.Session().region_name
     if region:
         return region
-    print(
-        f"WARNING: no AWS region resolved from env / profile / IMDS; "
-        f"falling back to {DEFAULT_REGION_FALLBACK}. Set AWS_REGION or "
-        f"pass --region to silence this."
+    raise RuntimeError(
+        "No AWS region resolved from env / profile / IMDS. "
+        "Set AWS_REGION or pass --region <region>."
     )
-    return DEFAULT_REGION_FALLBACK
 
 
 def parse_args():
@@ -118,9 +110,9 @@ def parse_args():
         "--region",
         default=None,
         help=(
-            f"AWS region. If unset, resolved from the boto3 session "
-            f"(env / profile / IMDS), falling back to "
-            f"{DEFAULT_REGION_FALLBACK} when nothing is configured."
+            "AWS region. If unset, resolved from the boto3 session "
+            "(env / profile / IMDS); the script errors out if nothing "
+            "is configured."
         ),
     )
     parser.add_argument("--role", default=ROLE_ARN, help="SageMaker execution role ARN")
