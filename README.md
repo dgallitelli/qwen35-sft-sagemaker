@@ -184,6 +184,10 @@ See `experiments/README.md` for details.
         └── Qwen3.5-9B--vanilla-full.yaml               # Instruct variant
 ```
 
+## Changelog
+
+User-facing changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## Credits
 
 Training infrastructure from [amazon-sagemaker-generativeai](https://github.com/aws-samples/amazon-sagemaker-generativeai). Recipes and dependency fixes for Qwen 3.5 by AWS.
