@@ -12,7 +12,7 @@ Validated SFT recipes for fine-tuning **Qwen 3.5** (4B and 9B, Base and post-tra
 | `Qwen3.5-9B-Base--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B-Base | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
 | `Qwen3.5-4B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-4B-Base | Full fine-tuning | ml.g7e.2xlarge | Validated |
 | `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.g7e.12xlarge | Validated |
-| `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.g6e.12xlarge | Not yet tested |
+| `Qwen3.5-9B-Base--vanilla-full.yaml` | Qwen/Qwen3.5-9B-Base | Full fine-tuning | ml.g6e.12xlarge | Does not fit (OOM) — see [Default Hyperparameters](#default-hyperparameters) |
 | `Qwen3.5-4B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-4B (Instruct) | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
 | `Qwen3.5-9B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B (Instruct) | QLoRA (4-bit) | ml.g5.2xlarge | Validated |
 | `Qwen3.5-9B--vanilla-peft-qlora.yaml` | Qwen/Qwen3.5-9B (Instruct) | QLoRA (4-bit) | ml.g6e.2xlarge | Validated |
@@ -42,6 +42,35 @@ No recipe changes were required when switching between instance types within the
 | T7 | 9B Instruct | QLoRA | ml.g6e.2xlarge | 1× L40S 48 GB | ~22 min |
 
 The Instruct recipes pass the same `model_name_or_path` (drop the `-Base` suffix) and otherwise inherit the Base recipe wholesale — no DLC, dependency, or trainer changes were needed.
+
+## Default Hyperparameters
+
+Every "Validated" cell above ran with the recipe defaults below, on 100 synthetic Q/A pairs for 10 epochs. **Recipe defaults are tuned to fit on the recommended instance — if you change them, you may need a larger instance.**
+
+| Setting | Value |
+|---------|-------|
+| `torch_dtype` | `bfloat16` |
+| `attn_implementation` | `sdpa` |
+| `bf16` | `true` |
+| `tf32` | `false` |
+| `use_liger` | `false` |
+| `max_seq_length` | `4096` |
+| `packing` | `false` |
+| `modality_type` | `"text"` |
+| `per_device_train_batch_size` | `2` |
+| `gradient_accumulation_steps` | `2` |
+| `gradient_checkpointing` | `true` (with `use_reentrant: true`) |
+| `num_train_epochs` | `10` |
+| `learning_rate` | `1.0e-4` |
+| `lr_scheduler_type` | `cosine` |
+| `warmup_ratio` | `0.1` |
+| `seed` | `42` |
+| **QLoRA-only** | |
+| `load_in_4bit` | `true` |
+| `lora_target_modules` | `["q_proj", "k_proj", "v_proj", "o_proj"]` |
+| `lora_r` / `lora_alpha` | `8` / `16` |
+
+**Memory footprint hint** (9B full SFT, default recipe): ZeRO-3 with `per_device_train_batch_size=2` and `max_seq_length=4096` consumes ~43 GB per GPU at peak — fits comfortably on `ml.g7e.12xlarge` (4× 96 GB), **does not fit** on `ml.g6e.12xlarge` (4× 48 GB) and OOMs in the backward pass. To fit on smaller GPUs, lower `per_device_train_batch_size` to 1 (with `gradient_accumulation_steps=4` to keep the effective batch size), reduce `max_seq_length`, and/or enable optimizer offload to CPU in `sagemaker_code/configs/accelerate/ds_zero3.yaml`.
 
 ## Quick Start
 
